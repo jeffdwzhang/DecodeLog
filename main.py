@@ -13,18 +13,10 @@ import zstandard as zstd
 # Press Double ⇧ to search everywhere for classes, files, tool windows, actions, and settings.
 
 
-def print_hi(name):
-    # Use a breakpoint in the code line below to debug your script.
-    print(f'Hi, {name}')  # Press ⌘F8 to toggle the breakpoint.
-
-
-MAGIC_NO_COMPRESS_START = 0x03
-MAGIC_NO_COMPRESS_START1 = 0x06
-MAGIC_NO_COMPRESS_NO_CRYPT_START = 0x08
-MAGIC_COMPRESS_START = 0x04
-MAGIC_COMPRESS_START1 = 0x05
-MAGIC_COMPRESS_START2 = 0x07
-MAGIC_COMPRESS_NO_CRYPT_START = 0x09
+MAGIC_SYNC_ZLIB_START = 0x06
+MAGIC_SYNC_ZLIB_NO_CRYPT_START = 0x07
+MAGIC_ASYNC_ZLIB_START = 0x08
+MAGIC_ASYNC_ZLIB_NO_CRYPT_START = 0x09
 
 MAGIC_SYNC_ZSTD_START = 0x0A
 MAGIC_SYNC_NO_CRYPT_ZSTD_START = 0x0B
@@ -35,41 +27,39 @@ MAGIC_END = 0x00
 
 lastseq = 0
 
-
-PRIV_KEY = ""
-PUB_KEY = ""
-
-
-class ZstdDecompressReader:
-    def __init__(self, buffer):
-        self.buffer = buffer
-
-    def read(self, size):
-        return self.buffer
-
+PRIV_KEY = "145aa7717bf9745b91e9569b80bbf1eedaa6cc6cd0e26317d810e35710f44cf8"
+PUB_KEY = "572d1e2710ae5fbca54c76a382fdd44050b3a675cb2bf39feebe85ef63d947aff0fa4943f1112e8b6af34bebebbaefa1a0aae055d9259b89a1858f7cc9af9df1"
 
 def tea_decipher(v, k):
     op = 0xffffffff
     delta = 0x9E3779B9
+    v0, v1 = struct.unpack('=LL', v[0:8])
+    k1, k2, k3, k4 = struct.unpack('=LLL', k[0:16])
+    s = (delta << 4) & op
 
+def tea_decrypt(v, k):
+    num = len(v) / 8 * 8
+    ret = ''
+
+def isValideStart(magic_start):
+    if MAGIC_SYNC_ZLIB_START == magic_start \
+            or MAGIC_SYNC_ZLIB_NO_CRYPT_START == magic_start \
+            or MAGIC_ASYNC_ZLIB_START == magic_start \
+            or MAGIC_ASYNC_ZLIB_NO_CRYPT_START == magic_start \
+            or MAGIC_SYNC_ZSTD_START == magic_start \
+            or MAGIC_SYNC_NO_CRYPT_ZSTD_START == magic_start \
+            or MAGIC_ASYNC_ZSTD_START == magic_start \
+            or MAGIC_ASYNC_NO_CRYPT_ZSTD_START == magic_start:
+        return True
+    else:
+        return False
 
 def IsGoodLogBuffer(_buffer, _offset, count):
     if _offset == len(_buffer):
         return (True, '')
 
     magic_start = _buffer[_offset]
-    if MAGIC_NO_COMPRESS_START == magic_start \
-            or MAGIC_COMPRESS_START == magic_start \
-            or MAGIC_COMPRESS_START1 == magic_start:
-        crypt_key_len = 4
-    elif MAGIC_COMPRESS_START2 == magic_start \
-            or MAGIC_NO_COMPRESS_START1 == magic_start \
-            or MAGIC_NO_COMPRESS_NO_CRYPT_START == magic_start \
-            or MAGIC_COMPRESS_NO_CRYPT_START == magic_start \
-            or MAGIC_SYNC_ZSTD_START == magic_start \
-            or MAGIC_SYNC_NO_CRYPT_ZSTD_START == magic_start \
-            or MAGIC_ASYNC_ZSTD_START == magic_start \
-            or MAGIC_ASYNC_NO_CRYPT_ZSTD_START == magic_start:
+    if isValideStart(magic_start):
         crypt_key_len = 64
     else:
         return False, '_buffer[%d]:%d != MAGIC_NUM_START' % (_offset, _buffer[_offset])
@@ -87,6 +77,8 @@ def IsGoodLogBuffer(_buffer, _offset, count):
             False,
             'log length:%d, end pos %d > len(buffer):%d' % (length, _offset + headerLen + length + 1, len(_buffer))
         )
+    magic_end = _buffer[_offset + headerLen + length]
+    print("offset: ", _offset, "length: ", length , "magic_end: ", magic_end)
     if MAGIC_END != _buffer[_offset + headerLen + length]:
         return (False,
                 'log length:%d, buffer[%d]:%d != MAGIC_END' % (length, _offset + headerLen + length, _buffer[_offset + headerLen + length]))
@@ -103,18 +95,9 @@ def GetLogStartPos(_buffer, _count):
         if offset >= len(_buffer):
             break
         magic_start = _buffer[offset]
-        if MAGIC_NO_COMPRESS_START == magic_start \
-                or MAGIC_NO_COMPRESS_START1 == magic_start \
-                or MAGIC_COMPRESS_START == magic_start \
-                or MAGIC_COMPRESS_START1 == magic_start \
-                or MAGIC_COMPRESS_START2 == magic_start \
-                or MAGIC_COMPRESS_NO_CRYPT_START == magic_start \
-                or MAGIC_NO_COMPRESS_NO_CRYPT_START == magic_start \
-                or MAGIC_SYNC_ZSTD_START == magic_start \
-                or MAGIC_SYNC_NO_CRYPT_ZSTD_START == magic_start \
-                or MAGIC_ASYNC_ZSTD_START == magic_start \
-                or MAGIC_ASYNC_NO_CRYPT_ZSTD_START == magic_start:
+        if isValideStart(magic_start):
             if IsGoodLogBuffer(_buffer, offset, _count)[0]:
+                print("GetLogStartPos -> offset:", offset, " magic_start:", magic_start)
                 return offset
 
         offset += 1
@@ -136,18 +119,9 @@ def DecodeBuffer(_buffer, _offset, _outbuffer):
             _offset += fixpos
 
     magic_start = _buffer[_offset]
-    if MAGIC_NO_COMPRESS_START == magic_start \
-            or MAGIC_COMPRESS_START == magic_start \
-            or MAGIC_COMPRESS_START1 == magic_start:
-        crypt_key_len = 4
-    elif MAGIC_COMPRESS_START2 == magic_start \
-            or MAGIC_NO_COMPRESS_START1 == magic_start \
-            or MAGIC_NO_COMPRESS_NO_CRYPT_START == magic_start \
-            or MAGIC_COMPRESS_NO_CRYPT_START == magic_start \
-            or MAGIC_SYNC_ZSTD_START == magic_start \
-            or MAGIC_SYNC_NO_CRYPT_ZSTD_START == magic_start \
-            or MAGIC_ASYNC_ZSTD_START == magic_start \
-            or MAGIC_ASYNC_NO_CRYPT_ZSTD_START == magic_start:
+    print('magic_start:', magic_start)
+
+    if isValideStart(magic_start):
         crypt_key_len = 64
     else:
         _outbuffer.extend('in DecodeBuffer _buffer[%d]:%d != MAGIC_NUM_START' % (_offset, magic_start))
@@ -158,6 +132,7 @@ def DecodeBuffer(_buffer, _offset, _outbuffer):
     v = memoryview(_buffer)
     index = _offset + headerLen - 4 - crypt_key_len
     length = struct.unpack_from("I", v[index: index + 4])[0]
+    print("DecodeBuffer -> index:", index, "log length:", length)
     tmpbuffer = bytearray(length)
 
     index = _offset + headerLen - 4 - crypt_key_len - 2 - 2
@@ -168,6 +143,7 @@ def DecodeBuffer(_buffer, _offset, _outbuffer):
     end_hour = struct.unpack_from("c", v[index: index + 1])[0]
 
     print(seq, begin_hour, end_hour, end=' ')
+    print('\n')
 
     global lastseq
     if seq != 0 and seq != 1 and lastseq != 0 and seq != (lastseq + 1):
@@ -179,28 +155,22 @@ def DecodeBuffer(_buffer, _offset, _outbuffer):
     tmpbuffer[:] = _buffer[_offset + headerLen : _offset + headerLen + length]
 
     try:
-
-        if MAGIC_NO_COMPRESS_START1 == _buffer[_offset] \
-                or MAGIC_COMPRESS_START2 == _buffer[_offset] \
+        if MAGIC_SYNC_ZLIB_START == _buffer[_offset] \
+                or MAGIC_SYNC_ZLIB_NO_CRYPT_START == _buffer[_offset] \
                 or MAGIC_SYNC_ZSTD_START == _buffer[_offset] \
-                or MAGIC_ASYNC_ZSTD_START == _buffer[_offset]:
+                or MAGIC_SYNC_NO_CRYPT_ZSTD_START == _buffer[_offset]:
+            # 同步模式下，log暂时未压缩，因此无需解压缩
             pass
-        elif MAGIC_ASYNC_NO_CRYPT_ZSTD_START == _buffer[_offset]:
-            decompressor = zstd.ZstdDecompressor()
-            tmpbuffer = next(decompressor.read_from(ZstdDecompressReader(str(tmpbuffer)), 100000, 1000000))
-        elif MAGIC_COMPRESS_START == _buffer[_offset] or MAGIC_COMPRESS_NO_CRYPT_START == _buffer[_offset]:
+        elif MAGIC_ASYNC_ZLIB_START == _buffer[_offset]:
             decompressor = zlib.decompressobj(-zlib.MAX_WBITS)
             tmpbuffer = decompressor.decompress(tmpbuffer)
-        elif MAGIC_COMPRESS_START1 == _buffer[_offset]:
-            decompress_data = bytearray()
-            while len(tmpbuffer) > 0:
-                tmp = memoryview(tmpbuffer)
-                single_log_len = struct.unpack_from("H", tmp[0:2])[0]
-                decompress_data.extend(tmpbuffer[2:single_log_len + 2])
-                tmpbuffer[:] = tmpbuffer[single_log_len + 2:len(tmpbuffer)]
-
+        elif MAGIC_ASYNC_ZSTD_START == _buffer[_offset]:
+            tmpbuffer = zstd.decompress(tmpbuffer, 1000000)
+        elif MAGIC_ASYNC_NO_CRYPT_ZSTD_START == _buffer[_offset]:
+            tmpbuffer = zstd.decompress(tmpbuffer, 1000000)
+        elif  MAGIC_ASYNC_ZLIB_NO_CRYPT_START == _buffer[_offset]:
             decompressor = zlib.decompressobj(-zlib.MAX_WBITS)
-            tmpbuffer = decompressor.decompress(str(decompress_data))
+            tmpbuffer = decompressor.decompress(tmpbuffer)
 
         else:
             pass
